@@ -1,0 +1,155 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Role {
+  id        String   @id @default(uuid())
+  code      RoleName @unique
+  isActive  Boolean  @default(true)
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users     Users[]
+}
+
+model Keystore {
+  id           String   @id @default(uuid())
+  primaryKey   String
+  secondaryKey String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  clientId     String?
+  client       Users?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+}
+
+model Tokenstore {
+  id        String    @id @default(uuid())
+  type      TokenType
+  token     String    @unique
+  shortCode String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  expireAt  DateTime
+  userId    String
+  user      Users     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([type, shortCode])
+  @@index([type, userId])
+}
+
+model Users {
+  id              String                @id @default(uuid())
+  email           String                @unique
+  password        String
+  firstName       String?
+  lastName        String?
+  phoneNumber     String?
+  profileImage    String?
+  isEmailVerified Boolean               @default(false)
+  emailVerifiedAt DateTime?
+  roleId          String
+  role            Role                  @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  provider        AuthProvider          @default(EMAIL)
+  oauthUid        String?
+  isActive        Boolean               @default(true)
+  isDeleted       Boolean               @default(false)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  keystores       Keystore[]
+  tokenstore      Tokenstore[]
+  memberships     Membership[]
+  auditions       AuditionSubmission[]
+
+  @@index([roleId])
+  @@index([provider, oauthUid])
+}
+
+model ContactSubmission {
+  id           String   @id @default(uuid())
+  name         String
+  email        String
+  subject      String
+  subjectLabel String
+  message      String
+  ipAddress    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([email])
+  @@index([createdAt])
+}
+
+model AuditionSubmission {
+  id        String   @id @default(uuid())
+  firstName String
+  lastName  String
+  email     String
+  videoUrl  String
+  photoUrl  String
+  userId    String?
+  user      Users?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@index([createdAt])
+  @@index([userId])
+}
+
+model Membership {
+  id                 String             @id @default(uuid())
+  userId             String
+  user               Users              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId             MembershipPlan
+  status             MembershipStatus   @default(ACTIVE)
+  startsAt           DateTime           @default(now())
+  endsAt             DateTime?
+  transactionId      String?
+  subscriptionId     String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@index([planId])
+}
+
+enum RoleName {
+  SUPER_ADMIN
+  USER
+}
+
+enum AuthProvider {
+  EMAIL
+  GOOGLE
+  FACEBOOK
+  APPLE
+}
+
+enum TokenType {
+  SIGNIN
+  SIGNUP
+  EMAIL_VERIFY
+  PHONE_VERIFY
+  TWO_FACTOR_AUTHENTICATION
+  FORGOT_PASSWORD
+  SET_PASSWORD
+}
+
+enum MembershipPlan {
+  monthly
+  yearly
+}
+
+enum MembershipStatus {
+  ACTIVE
+  CANCELLED
+  EXPIRED
+  PENDING
+}
