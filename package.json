@@ -14,7 +14,7 @@
     "keys": "cpx \"keys/**/*\" dist/keys",
     "copy-templates": "cpx \"src/email_templates/**/*\" dist/email_templates",
     "clean": "rimraf ./dist",
-    "pm2": "pm2 start npm --name the-movie-studio-api -- run serve",
+    "pm2": "pm2 start ecosystem.config.cjs",
     "seed": "prisma db seed"
   },
   "prisma": {
