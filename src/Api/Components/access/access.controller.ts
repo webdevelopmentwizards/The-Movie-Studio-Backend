@@ -8,6 +8,7 @@ import { AccessService } from './access.service';
 import { comparePassword } from "../../../utils/password";
 import KeystoreRepo from './keystore.repository';
 import { removePasswordFromUser } from '../../../utils/userUtils';
+import { getPlanAccess } from '../membership/membership.access';
 import {
   buildMobileOAuthErrorUrl,
   buildMobileOAuthSuccessUrl,
@@ -36,10 +37,14 @@ export class AccessController {
       );
 
       const userWithoutPassword = removePasswordFromUser(createdUser);
+      const planAccess = await getPlanAccess(createdUser as any);
 
       new SuccessResponse('Registration successful', {
         user: userWithoutPassword,
         tokens,
+        isMember: planAccess.isMember,
+        requiresPlan: planAccess.requiresPlan,
+        membership: planAccess.membership,
       }).send(res);
     },
   );
@@ -66,10 +71,14 @@ export class AccessController {
 
       const { tokens } = await this.service.generate('SIGNIN', user as UsersEntity);
       const userWithoutPassword = removePasswordFromUser(user);
+      const planAccess = await getPlanAccess(user as any);
 
       new SuccessResponse('Login successful', {
         user: userWithoutPassword,
         tokens,
+        isMember: planAccess.isMember,
+        requiresPlan: planAccess.requiresPlan,
+        membership: planAccess.membership,
       }).send(res);
     },
   );
@@ -86,7 +95,13 @@ export class AccessController {
       const user = await UserRepo.findById(req.user.id);
       if (!user) throw new BadRequestError('User not found');
       const userWithoutPassword = removePasswordFromUser(user);
-      new SuccessResponse('Authenticated user', { user: userWithoutPassword }).send(res);
+      const planAccess = await getPlanAccess(user as any);
+      new SuccessResponse('Authenticated user', {
+        user: userWithoutPassword,
+        isMember: planAccess.isMember,
+        requiresPlan: planAccess.requiresPlan,
+        membership: planAccess.membership,
+      }).send(res);
     },
   );
 
@@ -161,12 +176,17 @@ export class AccessController {
 
         const result = await this.service.handleGoogleCallback(code);
         const userWithoutPassword = removePasswordFromUser(result.user);
+        const planAccess = await getPlanAccess(result.user as any);
 
         if (mobileRedirectUri && isAllowlistedOAuthRedirectUri(mobileRedirectUri)) {
           const successUrl = buildMobileOAuthSuccessUrl(
             mobileRedirectUri,
             result.tokens,
-            userWithoutPassword as Record<string, unknown>
+            {
+              ...(userWithoutPassword as Record<string, unknown>),
+              isMember: planAccess.isMember,
+              requiresPlan: planAccess.requiresPlan,
+            }
           );
           return res.redirect(successUrl);
         }
@@ -174,6 +194,9 @@ export class AccessController {
         new SuccessResponse('Login successful', {
           user: userWithoutPassword,
           tokens: result.tokens,
+          isMember: planAccess.isMember,
+          requiresPlan: planAccess.requiresPlan,
+          membership: planAccess.membership,
         }).send(res);
       } catch (error: any) {
         if (error instanceof BadRequestError) throw error;
@@ -254,12 +277,17 @@ export class AccessController {
 
         const result = await this.service.handleFacebookCallback(code);
         const userWithoutPassword = removePasswordFromUser(result.user);
+        const planAccess = await getPlanAccess(result.user as any);
 
         if (mobileRedirectUri && isAllowlistedOAuthRedirectUri(mobileRedirectUri)) {
           const successUrl = buildMobileOAuthSuccessUrl(
             mobileRedirectUri,
             result.tokens,
-            userWithoutPassword as Record<string, unknown>
+            {
+              ...(userWithoutPassword as Record<string, unknown>),
+              isMember: planAccess.isMember,
+              requiresPlan: planAccess.requiresPlan,
+            }
           );
           return res.redirect(successUrl);
         }
@@ -267,6 +295,9 @@ export class AccessController {
         new SuccessResponse('Login successful', {
           user: userWithoutPassword,
           tokens: result.tokens,
+          isMember: planAccess.isMember,
+          requiresPlan: planAccess.requiresPlan,
+          membership: planAccess.membership,
         }).send(res);
       } catch (error: any) {
         if (error instanceof BadRequestError) throw error;

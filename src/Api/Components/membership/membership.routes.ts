@@ -11,7 +11,8 @@ export class MembershipRoutes {
   }
 
   initRoutes(): void {
+    this.router.get('/config', this.controller.config);
     this.router.get('/me', authentication, this.controller.me);
-    this.router.post('/activate', authentication, this.controller.activate);
+    this.router.post('/pay', authentication, this.controller.pay);
   }
 }

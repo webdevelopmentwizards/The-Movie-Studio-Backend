@@ -40,3 +40,15 @@ export const MINIO = {
   bucket: process.env.MINIO_BUCKET as string,
   publicBaseUrl: process.env.MINIO_PUBLIC_BASE_URL as string,
 }
+
+export const AUTHORIZENET = {
+  apiLoginId: process.env.AUTHORIZENET_API_LOGIN_ID as string,
+  transactionKey: process.env.AUTHORIZENET_TRANSACTION_KEY as string,
+  clientKey: process.env.AUTHORIZENET_CLIENT_KEY as string,
+  env: process.env.AUTHORIZENET_ENV as string,
+}
+
+export const MEMBERSHIP = {
+  monthlyAmount: Number(process.env.MEMBERSHIP_MONTHLY_AMOUNT),
+  yearlyAmount: Number(process.env.MEMBERSHIP_YEARLY_AMOUNT),
+}

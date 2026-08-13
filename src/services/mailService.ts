@@ -161,6 +161,47 @@ export async function sendAuditionUserEmail({
   });
 }
 
+export async function sendPaymentStudioEmail({
+  name,
+  email,
+  planLabel,
+  amount,
+  transactionId,
+}: {
+  name: string;
+  email: string;
+  planLabel: string;
+  amount: string;
+  transactionId: string;
+}): Promise<void> {
+  await sendEmail({
+    to: SMTP.contactToEmail,
+    subject: `[Payment] ${planLabel} — ${name}`,
+    html: renderTemplate('payment-studio', { name, email, planLabel, amount, transactionId }),
+    replyTo: `"${name}" <${email}>`,
+  });
+}
+
+export async function sendPaymentUserEmail({
+  to,
+  firstName,
+  planLabel,
+  amount,
+  transactionId,
+}: {
+  to: string;
+  firstName: string;
+  planLabel: string;
+  amount: string;
+  transactionId: string;
+}): Promise<void> {
+  await sendEmail({
+    to,
+    subject: 'Your membership is confirmed — The Movie Studio',
+    html: renderTemplate('payment-user', { firstName, planLabel, amount, transactionId }),
+  });
+}
+
 export async function verifyMailTransport(): Promise<boolean> {
   if (!isMailConfigured()) return false;
   await getTransporter().verify();

@@ -17,6 +17,7 @@ export default class MembershipRepo {
       where: {
         userId,
         status: MembershipStatus.ACTIVE,
+        OR: [{ endsAt: null }, { endsAt: { gte: new Date() } }],
       },
       orderBy: { createdAt: 'desc' },
     });
