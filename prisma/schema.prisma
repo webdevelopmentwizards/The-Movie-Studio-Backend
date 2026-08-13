@@ -1,10 +1,12 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
 }
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  schemas  = ["app"]
 }
 
 model Role {
@@ -15,6 +17,8 @@ model Role {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   users     Users[]
+
+  @@schema("app")
 }
 
 model Keystore {
@@ -26,6 +30,8 @@ model Keystore {
   updatedAt    DateTime @updatedAt
   clientId     String?
   client       Users?   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@schema("app")
 }
 
 model Tokenstore {
@@ -41,6 +47,7 @@ model Tokenstore {
 
   @@unique([type, shortCode])
   @@index([type, userId])
+  @@schema("app")
 }
 
 model Users {
@@ -68,6 +75,7 @@ model Users {
 
   @@index([roleId])
   @@index([provider, oauthUid])
+  @@schema("app")
 }
 
 model ContactSubmission {
@@ -83,6 +91,7 @@ model ContactSubmission {
 
   @@index([email])
   @@index([createdAt])
+  @@schema("app")
 }
 
 model AuditionSubmission {
@@ -100,29 +109,33 @@ model AuditionSubmission {
   @@index([email])
   @@index([createdAt])
   @@index([userId])
+  @@schema("app")
 }
 
 model Membership {
-  id                 String             @id @default(uuid())
-  userId             String
-  user               Users              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  planId             MembershipPlan
-  status             MembershipStatus   @default(ACTIVE)
-  startsAt           DateTime           @default(now())
-  endsAt             DateTime?
-  transactionId      String?
-  subscriptionId     String?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  id             String           @id @default(uuid())
+  userId         String
+  user           Users            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId         MembershipPlan
+  status         MembershipStatus @default(ACTIVE)
+  startsAt       DateTime         @default(now())
+  endsAt         DateTime?
+  transactionId  String?
+  subscriptionId String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
 
   @@index([userId])
   @@index([status])
   @@index([planId])
+  @@schema("app")
 }
 
 enum RoleName {
   SUPER_ADMIN
   USER
+
+  @@schema("app")
 }
 
 enum AuthProvider {
@@ -130,6 +143,8 @@ enum AuthProvider {
   GOOGLE
   FACEBOOK
   APPLE
+
+  @@schema("app")
 }
 
 enum TokenType {
@@ -140,11 +155,15 @@ enum TokenType {
   TWO_FACTOR_AUTHENTICATION
   FORGOT_PASSWORD
   SET_PASSWORD
+
+  @@schema("app")
 }
 
 enum MembershipPlan {
   monthly
   yearly
+
+  @@schema("app")
 }
 
 enum MembershipStatus {
@@ -152,4 +171,6 @@ enum MembershipStatus {
   CANCELLED
   EXPIRED
   PENDING
+
+  @@schema("app")
 }
