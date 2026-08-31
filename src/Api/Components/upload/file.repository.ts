@@ -1,5 +1,6 @@
 import * as Minio from 'minio';
 import { randomUUID } from 'crypto';
+import fs from 'fs';
 import path from 'path';
 import { MINIO } from '../../../config/globals';
 
@@ -90,6 +91,43 @@ export default class FileRepo {
       name: file.originalname,
       size: file.size,
       extension: key.split('.').pop() || '',
+    };
+  }
+
+  public static async uploadLocalFile(
+    localFilePath: string,
+    folderOverride?: string,
+    contentType?: string,
+    originalFileName?: string,
+  ) {
+    const ext = path.extname(localFilePath).toLowerCase();
+    const folder = folderOverride || 'general';
+    const key = `${folder}/${randomUUID()}${ext}`;
+    const fileStream = fs.createReadStream(localFilePath);
+    const fileStat = fs.statSync(localFilePath);
+
+    const detectedMime =
+      contentType ||
+      (ext === '.mp4'
+        ? 'video/mp4'
+        : ext === '.jpg' || ext === '.jpeg'
+        ? 'image/jpeg'
+        : ext === '.webp'
+        ? 'image/webp'
+        : ext === '.png'
+        ? 'image/png'
+        : 'application/octet-stream');
+
+    await this.getClient().putObject(this.getBucket(), key, fileStream, fileStat.size, {
+      'Content-Type': detectedMime,
+    });
+
+    return {
+      key,
+      url: this.getPublicUrl(key),
+      name: originalFileName || path.basename(localFilePath),
+      size: fileStat.size,
+      extension: ext.replace(/^\./, ''),
     };
   }
 

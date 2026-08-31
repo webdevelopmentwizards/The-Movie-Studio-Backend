@@ -6,6 +6,7 @@ export {
   Tokenstore,
   ContactSubmission,
   AuditionSubmission,
+  AuditionStatus,
   Membership,
 } from '@prisma/client'
 

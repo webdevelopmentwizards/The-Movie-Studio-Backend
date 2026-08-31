@@ -95,18 +95,22 @@ model ContactSubmission {
 }
 
 model AuditionSubmission {
-  id        String   @id @default(uuid())
-  firstName String
-  lastName  String
-  email     String
-  videoUrl  String
-  photoUrl  String
-  userId    String?
-  user      Users?   @relation(fields: [userId], references: [id], onDelete: SetNull)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String         @id @default(uuid())
+  firstName    String
+  lastName     String
+  email        String
+  status       AuditionStatus @default(PROCESSING)
+  videoUrl     String?
+  photoUrl     String?
+  emailSent    Boolean        @default(false)
+  errorMessage String?
+  userId       String?
+  user         Users?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
   @@index([email])
+  @@index([status])
   @@index([createdAt])
   @@index([userId])
   @@schema("app")
@@ -171,6 +175,14 @@ enum MembershipStatus {
   CANCELLED
   EXPIRED
   PENDING
+
+  @@schema("app")
+}
+
+enum AuditionStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
 
   @@schema("app")
 }
