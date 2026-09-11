@@ -1,10 +1,5 @@
 import { Response } from 'express';
-import fs from 'fs';
-import path from 'path';
 import asyncHandler from '../../../helpers/async';
-import { BadRequestError } from '../../../core/ApiError';
-import { SuccessResponse } from '../../../core/ApiResponse';
-import FileRepo from '../upload/file.repository';
 import AuditionRepo from './audition.repository';
 import { AuditionStatus } from '../../../database';
 import {
@@ -12,7 +7,11 @@ import {
   sendAuditionStudioEmail,
   sendAuditionUserEmail,
 } from '../../../services/mailService';
-import { compressVideo, compressPhoto } from '../../../services/compression.service';
+import {
+  compressUploadedFile,
+  safeUnlink,
+} from '../../../services/media-compression.service';
+import { uploadToMinio } from '../../../services/storage.service';
 import Logger from '../../../core/Logger';
 
 const AUDITION_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
@@ -22,15 +21,30 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function cleanupTempFiles(filePaths: (string | undefined)[]) {
-  for (const filePath of filePaths) {
-    if (filePath && fs.existsSync(filePath)) {
-      try {
-        fs.unlinkSync(filePath);
-      } catch (err) {
-        Logger.warn(`Failed to remove temporary file: ${filePath}`);
-      }
-    }
+function writeProgress(res: Response, percent: number, stage: string) {
+  res.write(JSON.stringify({ type: 'progress', percent, stage }) + '\n');
+  const anyRes = res as Response & { flush?: () => void };
+  anyRes.flush?.();
+}
+
+function writeError(res: Response, message: string) {
+  if (!res.headersSent) {
+    res.status(400);
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('X-Accel-Buffering', 'no');
+  }
+  res.write(JSON.stringify({ type: 'error', message }) + '\n');
+  res.end();
+}
+
+function beginNdjsonStream(res: Response) {
+  res.status(200);
+  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('X-Accel-Buffering', 'no');
+  if (typeof (res as any).flushHeaders === 'function') {
+    (res as any).flushHeaders();
   }
 }
 
@@ -47,147 +61,158 @@ export class AuditionController {
     const video = files?.video?.[0];
     const photo = files?.photo?.[0];
 
-    const tempPathsToClean = [video?.path, photo?.path];
+    const cleanupInputs = async () => {
+      await safeUnlink(...[video?.path, photo?.path].filter(Boolean) as string[]);
+    };
 
     if (!firstName || !lastName) {
-      cleanupTempFiles(tempPathsToClean);
-      throw new BadRequestError('First and last name are required.');
+      await cleanupInputs();
+      res.status(400).json({ type: 'error', message: 'First and last name are required.' });
+      return;
     }
     if (!email || !isValidEmail(email)) {
-      cleanupTempFiles(tempPathsToClean);
-      throw new BadRequestError('A valid email is required.');
+      await cleanupInputs();
+      res.status(400).json({ type: 'error', message: 'A valid email is required.' });
+      return;
     }
-
     if (!video || !photo) {
-      cleanupTempFiles(tempPathsToClean);
-      throw new BadRequestError('Audition video and photo are required.');
+      await cleanupInputs();
+      res.status(400).json({ type: 'error', message: 'Video and photo are required.' });
+      return;
     }
-
     if (video.size <= 0 || video.size > AUDITION_MAX_VIDEO_BYTES) {
-      cleanupTempFiles(tempPathsToClean);
-      throw new BadRequestError('Video must be 100MB or smaller.');
+      await cleanupInputs();
+      res.status(400).json({ type: 'error', message: 'Video must be 100MB or smaller.' });
+      return;
     }
     if (photo.size <= 0 || photo.size > AUDITION_MAX_PHOTO_BYTES) {
-      cleanupTempFiles(tempPathsToClean);
-      throw new BadRequestError('Photo must be 10MB or smaller.');
+      await cleanupInputs();
+      res.status(400).json({ type: 'error', message: 'Photo must be 10MB or smaller.' });
+      return;
     }
 
-    // 1. Create DB record immediately with PROCESSING status
-    const submission = await AuditionRepo.create({
-      firstName,
-      lastName,
-      email,
-      status: AuditionStatus.PROCESSING,
-      userId: req.user?.id || null,
-    });
+    // Start streaming BEFORE heavy work (frontend parses NDJSON live)
+    beginNdjsonStream(res);
 
-    // 2. Respond HTTP 200 OK immediately (< 2s)
-    new SuccessResponse('Audition uploaded successfully and is being processed.', {
-      id: submission.id,
-      firstName: submission.firstName,
-      lastName: submission.lastName,
-      email: submission.email,
-      status: submission.status,
-      createdAt: submission.createdAt,
-    }).send(res);
+    let submissionId: string | undefined;
+    let cVideoPath: string | undefined;
+    let cPhotoPath: string | undefined;
 
-    // 3. Asynchronous background processing for compression, MinIO upload & email
-    const videoTempPath = video.path;
-    const photoTempPath = photo.path;
-    const uploadDir = path.dirname(videoTempPath);
+    try {
+      writeProgress(res, 20, 'receiving');
+      // Multer already finished writing temp files when handler runs
+      writeProgress(res, 35, 'received');
 
-    setImmediate(async () => {
-      const compressedVideoPath = path.join(
-        uploadDir,
-        `compressed-video-${submission.id}.mp4`,
-      );
-      const compressedPhotoPath = path.join(
-        uploadDir,
-        `compressed-photo-${submission.id}.jpg`,
-      );
+      const submission = await AuditionRepo.create({
+        firstName,
+        lastName,
+        email,
+        status: AuditionStatus.PROCESSING,
+        userId: req.user?.id || null,
+      });
+      submissionId = submission.id;
 
-      try {
-        Logger.info(`[Audition] Starting background compression for submission ${submission.id}`);
+      writeProgress(res, 55, 'compressing_photo');
+      const cPhoto = await compressUploadedFile(photo);
+      cPhotoPath = cPhoto.path;
 
-        // Step A: Compress Video & Photo in parallel
-        await Promise.all([
-          compressVideo(videoTempPath, compressedVideoPath),
-          compressPhoto(photoTempPath, compressedPhotoPath),
-        ]);
+      writeProgress(res, 75, 'compressing_video');
+      const cVideo = await compressUploadedFile(video);
+      cVideoPath = cVideo.path;
 
-        // Step B: Stream Upload Compressed Files to MinIO
-        const [videoUpload, photoUpload] = await Promise.all([
-          FileRepo.uploadLocalFile(
-            compressedVideoPath,
-            'auditions/video',
-            'video/mp4',
-            video.originalname,
-          ),
-          FileRepo.uploadLocalFile(
-            compressedPhotoPath,
-            'auditions/photo',
-            'image/jpeg',
-            photo.originalname,
-          ),
-        ]);
+      writeProgress(res, 90, 'storing');
+      const [videoUpload, photoUpload] = await Promise.all([
+        uploadToMinio(
+          cVideo.path,
+          'auditions/video',
+          `video-${submission.id}.mp4`,
+          cVideo.mimeType,
+        ),
+        uploadToMinio(
+          cPhoto.path,
+          'auditions/photo',
+          `photo-${submission.id}.jpg`,
+          cPhoto.mimeType,
+        ),
+      ]);
 
-        // Step C: Update DB Record to COMPLETED
-        await AuditionRepo.update(submission.id, {
-          videoUrl: videoUpload.url,
-          photoUrl: photoUpload.url,
-          status: AuditionStatus.COMPLETED,
-        });
+      await AuditionRepo.update(submission.id, {
+        videoUrl: videoUpload.url,
+        photoUrl: photoUpload.url,
+        status: AuditionStatus.COMPLETED,
+      });
 
-        // Step D: Send Emails Asynchronously
-        let emailSent = false;
-        if (isMailConfigured()) {
-          try {
-            const fullName = `${firstName} ${lastName}`.trim();
-            await sendAuditionStudioEmail({
-              fullName,
-              email,
-              videoUrl: videoUpload.url,
-              photoUrl: photoUpload.url,
-            });
-            await sendAuditionUserEmail({ to: email, firstName });
-            emailSent = true;
-          } catch (mailError) {
-            Logger.error(
-              `[Audition] Email sending failed for submission ${submission.id}: ${
-                mailError instanceof Error ? mailError.message : mailError
-              }`,
-            );
-          }
-        } else {
-          Logger.warn('[Audition] SMTP not configured; skipped audition emails.');
+      writeProgress(res, 95, 'email');
+      let emailSent = false;
+      if (isMailConfigured()) {
+        try {
+          const fullName = `${firstName} ${lastName}`.trim();
+          await sendAuditionStudioEmail({
+            fullName,
+            email,
+            videoUrl: videoUpload.url,
+            photoUrl: photoUpload.url,
+          });
+          await sendAuditionUserEmail({ to: email, firstName });
+          emailSent = true;
+        } catch (mailError) {
+          Logger.error(
+            `[Audition] Email failed for ${submission.id}: ${
+              mailError instanceof Error ? mailError.message : mailError
+            }`,
+          );
         }
-
-        if (emailSent) {
-          await AuditionRepo.update(submission.id, { emailSent: true }).catch(() => {});
-        }
-
-        Logger.info(`[Audition] Successfully finished processing for submission ${submission.id}`);
-      } catch (error) {
-        Logger.error(
-          `[Audition] Error during background processing for submission ${submission.id}: ${
-            error instanceof Error ? error.message : error
-          }`,
-        );
-        await AuditionRepo.update(submission.id, {
-          status: AuditionStatus.FAILED,
-          errorMessage: error instanceof Error ? error.message : 'Processing failed',
-        }).catch((err) => {
-          Logger.error(`[Audition] Failed to mark audition as FAILED: ${err}`);
-        });
-      } finally {
-        // Step E: Clean up all temporary files safely
-        cleanupTempFiles([
-          videoTempPath,
-          photoTempPath,
-          compressedVideoPath,
-          compressedPhotoPath,
-        ]);
+      } else {
+        Logger.warn('[Audition] SMTP not configured; skipped emails.');
       }
-    });
+
+      if (emailSent) {
+        await AuditionRepo.update(submission.id, { emailSent: true }).catch(() => {});
+      }
+
+      res.write(
+        JSON.stringify({
+          type: 'done',
+          percent: 100,
+          data: {
+            id: submission.id,
+            firstName: submission.firstName,
+            lastName: submission.lastName,
+            email: submission.email,
+            videoUrl: videoUpload.url,
+            photoUrl: photoUpload.url,
+            createdAt: submission.createdAt,
+          },
+        }) + '\n',
+      );
+      res.end();
+
+      await safeUnlink(video.path, photo.path, cVideo.path, cPhoto.path);
+      Logger.info(`[Audition] NDJSON stream completed for ${submission.id}`);
+    } catch (err: any) {
+      Logger.error(
+        `[Audition] Stream failed${submissionId ? ` for ${submissionId}` : ''}: ${
+          err?.message || err
+        }`,
+      );
+
+      if (submissionId) {
+        await AuditionRepo.update(submissionId, {
+          status: AuditionStatus.FAILED,
+          errorMessage: err?.message || 'Submission failed',
+        }).catch(() => {});
+      }
+
+      if (!res.writableEnded) {
+        writeError(res, err?.message || 'Submission failed.');
+      }
+
+      await safeUnlink(
+        video.path,
+        photo.path,
+        ...(cVideoPath ? [cVideoPath] : []),
+        ...(cPhotoPath ? [cPhotoPath] : []),
+      );
+    }
   });
 }

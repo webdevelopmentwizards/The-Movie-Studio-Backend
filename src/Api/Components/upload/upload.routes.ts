@@ -1,10 +1,8 @@
-import { Router } from "express";
-import { FileController } from "./file.controller";
-import multer from "multer";
-import authentication from "../../../middleware/authentication";
-import requireMembership from "../../../middleware/requireMembership";
-
-const upload = multer({ storage: multer.memoryStorage() });
+import { Router } from 'express';
+import { FileController } from './file.controller';
+import authentication from '../../../middleware/authentication';
+import requireMembership from '../../../middleware/requireMembership';
+import { singleFileUpload } from '../../../middleware/upload.middleware';
 
 export class FileRoutes {
   readonly router: Router = Router();
@@ -16,26 +14,26 @@ export class FileRoutes {
 
   initRoutes(): void {
     this.router.post(
-      "/upload",
+      '/upload',
       authentication,
       requireMembership,
-      upload.single("file"),
-      this.controller.upload
+      singleFileUpload,
+      this.controller.upload,
     );
 
     this.router.post(
-      "/delete",
+      '/delete',
       authentication,
       requireMembership,
-      this.controller.delete
+      this.controller.delete,
     );
 
     this.router.put(
-      "/update",
+      '/update',
       authentication,
       requireMembership,
-      upload.single("file"),
-      this.controller.update
+      singleFileUpload,
+      this.controller.update,
     );
   }
 }

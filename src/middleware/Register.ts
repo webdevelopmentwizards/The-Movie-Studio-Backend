@@ -27,10 +27,21 @@ const registerMiddleware = (router: Router): void => {
   );
 
   router.use(helmet());
-  router.use(compression());
+  // Skip gzip for NDJSON audition progress streams so chunks flush live
+  router.use(
+    compression({
+      filter: (req, res) => {
+        const accept = String(req.headers.accept || '');
+        if (accept.includes('application/x-ndjson')) return false;
+        if (req.path.includes('/audition/submit')) return false;
+        return compression.filter(req, res);
+      },
+    }),
+  );
 
-  router.use(express.json());
-  router.use(express.urlencoded({ limit: "100mb", extended: true }));
+  // JSON only — multipart files go through multer disk stream, not json parser
+  router.use(express.json({ limit: '2mb' }));
+  router.use(express.urlencoded({ limit: '2mb', extended: true }));
 
   router.use(cookieParser());
 };
