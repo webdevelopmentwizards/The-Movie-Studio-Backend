@@ -14,6 +14,10 @@ import {
   buildMobileOAuthSuccessUrl,
   isAllowlistedOAuthRedirectUri,
 } from '../../../utils/oauthRedirect';
+import {
+  issueAppBridgeCode,
+  resolveAppBridge,
+} from './appBridge.store';
 
 export class AccessController {
   private service: AccessService = new AccessService();
@@ -85,8 +89,62 @@ export class AccessController {
 
   logout = asyncHandler(
     async (req: any, res: Response, next: NextFunction): Promise<Response | void> => {
-      await KeystoreRepo.remove(req.user?.id);
+      if (req.user?.id && req.keystore?.primaryKey) {
+        await KeystoreRepo.removeCurrent(req.user.id, req.keystore.primaryKey);
+      } else if (req.user?.id) {
+        await KeystoreRepo.remove(req.user.id);
+      }
       new SuccessMsgResponse('Logout successful').send(res);
+    },
+  );
+
+  /**
+   * App-only handoff. Web login/signup/pay do not use this.
+   * The app opens the website with the code; the site trades it for its own session.
+   */
+  createAppBridge = asyncHandler(
+    async (req: any, res: Response): Promise<Response | void> => {
+      const issued = issueAppBridgeCode(req.user.id);
+      new SuccessResponse('Payment link ready', issued).send(res);
+    },
+  );
+
+  consumeAppBridge = asyncHandler(
+    async (req: any, res: Response): Promise<Response | void> => {
+      const code = String(req.body?.code || '').trim();
+      if (!code) throw new BadRequestError('Payment link is missing.');
+
+      const result = await resolveAppBridge(code, async userId => {
+        const user = await UserRepo.findById(userId);
+        if (!user) throw new BadRequestError('Account not found.');
+        if (!user.isActive) {
+          throw new BadRequestError('Your account has been deactivated');
+        }
+        if (user.isDeleted) {
+          throw new BadRequestError('Your account has been deleted');
+        }
+
+        const { tokens } = await this.service.generate(
+          'SIGNIN',
+          user as UsersEntity,
+        );
+        const planAccess = await getPlanAccess(user as any);
+        return {
+          user: removePasswordFromUser(user),
+          tokens,
+          isMember: planAccess.isMember,
+          requiresPlan: planAccess.requiresPlan,
+          membership: planAccess.membership,
+        };
+      });
+
+      if (!result) {
+        throw new BadRequestError(
+          'This payment link has expired. Go back to the app and try again.',
+        );
+      }
+
+      new SuccessResponse('Signed in for payment', result).send(res);
     },
   );
 

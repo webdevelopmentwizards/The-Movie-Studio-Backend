@@ -11,6 +11,18 @@ export default class KeystoreRepo {
     })
   }
 
+  public static removeCurrent(
+    client: UsersEntity["id"],
+    primaryKey: string,
+  ): Promise<any | null> {
+    return KeystoreModel.deleteMany({
+      where: {
+        clientId: client,
+        primaryKey,
+      },
+    });
+  }
+
   public static remove(client: UsersEntity["id"]): Promise<any | null> {
     console.log(client, "client")
     return KeystoreModel.deleteMany({

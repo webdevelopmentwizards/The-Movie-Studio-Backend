@@ -44,6 +44,17 @@ export class AccessRoutes {
       this.controller.me
     );
 
+    this.router.post(
+      '/app-bridge',
+      authentication,
+      this.controller.createAppBridge
+    );
+
+    this.router.post(
+      '/app-bridge/consume',
+      this.controller.consumeAppBridge
+    );
+
     this.router.get('/google', this.controller.googleAuth);
     this.router.get('/google/callback', this.controller.googleCallback);
     this.router.get('/facebook', this.controller.facebookAuth);
