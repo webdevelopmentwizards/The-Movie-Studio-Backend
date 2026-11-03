@@ -1,7 +1,12 @@
 import { Router } from 'express';
 import validator from '../../../validations/validator';
 import authentication from '../../../middleware/authentication';
-import { AppSigninValidationSchema, AppSignupValidationSchema } from './../../../validations/payloadSchema/AccessSchema';
+import {
+  AppForgotPasswordValidationSchema,
+  AppResetPasswordValidationSchema,
+  AppSigninValidationSchema,
+  AppSignupValidationSchema,
+} from './../../../validations/payloadSchema/AccessSchema';
 import { AccessController } from './access.controller';
 
 export class AccessRoutes {
@@ -30,6 +35,18 @@ export class AccessRoutes {
       '/register',
       validator(AppSignupValidationSchema),
       this.controller.register
+    );
+
+    this.router.post(
+      '/forgot-password',
+      validator(AppForgotPasswordValidationSchema),
+      this.controller.forgotPassword
+    );
+
+    this.router.post(
+      '/reset-password',
+      validator(AppResetPasswordValidationSchema),
+      this.controller.resetPassword
     );
 
     this.router.post(

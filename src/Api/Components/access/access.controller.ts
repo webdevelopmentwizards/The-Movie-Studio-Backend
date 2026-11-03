@@ -1,7 +1,7 @@
 import { Response, NextFunction, Request } from "express";
 import asyncHandler from "../../../helpers/async";
 import UserRepo from './user.repository';
-import { BadRequestError } from '../../../core/ApiError';
+import { BadRequestError, InternalError } from '../../../core/ApiError';
 import type { UsersEntity } from './User';
 import { SuccessMsgResponse, SuccessResponse } from '../../../core/ApiResponse';
 import { AccessService } from './access.service';
@@ -18,6 +18,17 @@ import {
   issueAppBridgeCode,
   resolveAppBridge,
 } from './appBridge.store';
+import TokenRepo from '../token/token.repository';
+import { generateOTP, generateRandomString } from '../../../utils/authUtils';
+import {
+  isMailConfigured,
+  sendForgotPasswordEmail,
+} from '../../../services/mailService';
+import Logger from '../../../core/Logger';
+
+const FORGOT_PASSWORD_TTL_MS = 15 * 60 * 1000;
+const FORGOT_PASSWORD_MSG =
+  'If an account exists for that email, a reset code has been sent.';
 
 export class AccessController {
   private service: AccessService = new AccessService();
@@ -160,6 +171,84 @@ export class AccessController {
         requiresPlan: planAccess.requiresPlan,
         membership: planAccess.membership,
       }).send(res);
+    },
+  );
+
+  forgotPassword = asyncHandler(
+    async (req: any, res: Response): Promise<Response | void> => {
+      const email = String(req.body?.email || '').trim();
+      if (!email) throw new BadRequestError('Email is required');
+
+      if (!isMailConfigured()) {
+        throw new InternalError('Email is not configured. Please try again later.');
+      }
+
+      const user = await UserRepo.findByEmail(email);
+      if (user && user.isActive && !user.isDeleted) {
+        const otp = String(generateOTP());
+        await TokenRepo.delete({
+          where: { userId: user.id, type: 'FORGOT_PASSWORD' },
+        });
+        await TokenRepo.create({
+          type: 'FORGOT_PASSWORD',
+          token: generateRandomString(32),
+          shortCode: otp,
+          expireAt: new Date(Date.now() + FORGOT_PASSWORD_TTL_MS),
+          userId: user.id,
+        });
+
+        const name =
+          user.firstName?.trim() ||
+          email.split('@')[0] ||
+          'there';
+
+        try {
+          await sendForgotPasswordEmail({ to: user.email, name, otp });
+        } catch (error) {
+          Logger.error(
+            `Forgot password email failed: ${error instanceof Error ? error.message : error}`,
+          );
+          throw new InternalError(
+            'Unable to send reset code right now. Please try again shortly.',
+          );
+        }
+      }
+
+      new SuccessMsgResponse(FORGOT_PASSWORD_MSG).send(res);
+    },
+  );
+
+  resetPassword = asyncHandler(
+    async (req: any, res: Response): Promise<Response | void> => {
+      const email = String(req.body?.email || '').trim();
+      const otp = String(req.body?.otp || '').trim();
+      const password = String(req.body?.password || '');
+
+      if (!email || !otp || !password) {
+        throw new BadRequestError('Email, code, and new password are required');
+      }
+
+      const user = await UserRepo.findByEmail(email);
+      if (!user || !user.isActive || user.isDeleted) {
+        throw new BadRequestError('Invalid or expired reset code');
+      }
+
+      const token = await TokenRepo.findOne({
+        where: {
+          userId: user.id,
+          type: 'FORGOT_PASSWORD',
+          shortCode: otp,
+          expireAt: { gte: new Date() },
+        },
+      });
+      if (!token) throw new BadRequestError('Invalid or expired reset code');
+
+      await UserRepo.updatePassword(user.id, { password });
+      await TokenRepo.delete({
+        where: { userId: user.id, type: 'FORGOT_PASSWORD' },
+      });
+
+      new SuccessMsgResponse('Password updated. You can sign in now.').send(res);
     },
   );
 

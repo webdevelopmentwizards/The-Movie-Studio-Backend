@@ -13,3 +13,13 @@ export const AppSignupValidationSchema = Joi.object().keys({
   contactNumber: Joi.string().trim().optional().allow('', null),
   phoneNumber: Joi.string().trim().optional().allow('', null),
 }).meta({ className: 'AppSignupPayloadDTO' });
+
+export const AppForgotPasswordValidationSchema = Joi.object().keys({
+  email: Joi.string().email().min(3).max(50).required(),
+}).meta({ className: 'AppForgotPasswordPayloadDTO' });
+
+export const AppResetPasswordValidationSchema = Joi.object().keys({
+  email: Joi.string().email().min(3).max(50).required(),
+  otp: Joi.string().trim().length(6).pattern(/^\d+$/).required(),
+  password: Joi.string().min(6).max(500).required(),
+}).meta({ className: 'AppResetPasswordPayloadDTO' });

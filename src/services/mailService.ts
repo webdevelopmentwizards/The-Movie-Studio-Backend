@@ -202,6 +202,22 @@ export async function sendPaymentUserEmail({
   });
 }
 
+export async function sendForgotPasswordEmail({
+  to,
+  name,
+  otp,
+}: {
+  to: string;
+  name: string;
+  otp: string;
+}): Promise<void> {
+  await sendEmail({
+    to,
+    subject: 'Reset your password — The Movie Studio',
+    html: renderTemplate('forgot-password', { name, otp }),
+  });
+}
+
 export async function verifyMailTransport(): Promise<boolean> {
   if (!isMailConfigured()) return false;
   await getTransporter().verify();
