@@ -40,6 +40,16 @@ function fromAddress(): string {
   return name ? `"${name}" <${email}>` : email;
 }
 
+const INLINE_TEMPLATES: Record<string, string> = {
+  'forgot-password': `<div style="font-family:Segoe UI,Arial,sans-serif;line-height:1.5;color:#18181b;">
+  <p>Hi {{name}},</p>
+  <p>Use this code to reset your <strong>The Movie Studio</strong> password:</p>
+  <p style="font-size:28px;letter-spacing:6px;font-weight:700;margin:20px 0;">{{otp}}</p>
+  <p>This code expires in 15 minutes. If you did not request a reset, you can ignore this email.</p>
+  <p style="margin-top:24px;color:#71717a;font-size:13px;">— The Movie Studio<br/>info@themoviestudio.com</p>
+</div>`,
+};
+
 function loadEmailTemplate(templateName: string): string {
   const possiblePaths = [
     path.join(__dirname, '../email_templates', `${templateName}.html`),
@@ -53,6 +63,11 @@ function loadEmailTemplate(templateName: string): string {
     if (fs.existsSync(templatePath)) {
       return fs.readFileSync(templatePath, 'utf-8');
     }
+  }
+
+  if (INLINE_TEMPLATES[templateName]) {
+    Logger.warn(`Email template ${templateName}.html missing on disk; using inline fallback.`);
+    return INLINE_TEMPLATES[templateName];
   }
 
   throw new Error(`Email template ${templateName}.html not found`);

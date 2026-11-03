@@ -185,22 +185,49 @@ export class AccessController {
 
       const user = await UserRepo.findByEmail(email);
       if (user && user.isActive && !user.isDeleted) {
-        const otp = String(generateOTP());
-        await TokenRepo.delete({
-          where: { userId: user.id, type: 'FORGOT_PASSWORD' },
-        });
-        await TokenRepo.create({
-          type: 'FORGOT_PASSWORD',
-          token: generateRandomString(32),
-          shortCode: otp,
-          expireAt: new Date(Date.now() + FORGOT_PASSWORD_TTL_MS),
-          userId: user.id,
-        });
-
         const name =
           user.firstName?.trim() ||
           email.split('@')[0] ||
           'there';
+
+        let otp = '';
+        let lastError: unknown;
+
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          otp = String(generateOTP());
+          try {
+            await TokenRepo.delete({
+              where: { userId: user.id, type: 'FORGOT_PASSWORD' },
+            });
+            await TokenRepo.create({
+              type: 'FORGOT_PASSWORD',
+              token: generateRandomString(32),
+              shortCode: otp,
+              expireAt: new Date(Date.now() + FORGOT_PASSWORD_TTL_MS),
+              userId: user.id,
+            });
+            lastError = null;
+            break;
+          } catch (error) {
+            lastError = error;
+            Logger.warn(
+              `Forgot password token create retry ${attempt + 1}: ${
+                error instanceof Error ? error.message : error
+              }`,
+            );
+          }
+        }
+
+        if (lastError || !otp) {
+          Logger.error(
+            `Forgot password token create failed: ${
+              lastError instanceof Error ? lastError.message : lastError
+            }`,
+          );
+          throw new InternalError(
+            'Unable to send reset code right now. Please try again shortly.',
+          );
+        }
 
         try {
           await sendForgotPasswordEmail({ to: user.email, name, otp });
