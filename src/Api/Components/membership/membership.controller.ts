@@ -7,6 +7,7 @@ import { getPlanAccess } from './membership.access';
 import MembershipRepo from './membership.repository';
 import { AUTHORIZENET, MEMBERSHIP, SMTP } from '../../../config/globals';
 import { chargeOpaqueData } from '../../../services/authorizeNet';
+import { verifyApplePurchasePayload } from '../../../services/appleIap';
 import {
   isMailConfigured,
   sendPaymentStudioEmail,
@@ -18,6 +19,21 @@ const PLAN_LABEL: Record<MembershipPlan, string> = {
   monthly: 'Monthly',
   yearly: 'Yearly',
 };
+
+const APPLE_PRODUCT_IDS: Record<MembershipPlan, string> = {
+  monthly:
+    process.env.APPLE_IAP_MONTHLY_PRODUCT_ID ||
+    'com.themoviestudio.app.membership.monthly',
+  yearly:
+    process.env.APPLE_IAP_YEARLY_PRODUCT_ID ||
+    'com.themoviestudio.app.membership.yearly',
+};
+
+function planIdFromAppleProductId(productId: string): MembershipPlan | null {
+  if (productId === APPLE_PRODUCT_IDS.monthly) return MembershipPlan.monthly;
+  if (productId === APPLE_PRODUCT_IDS.yearly) return MembershipPlan.yearly;
+  return null;
+}
 
 function planAmount(planId: MembershipPlan): number {
   return planId === MembershipPlan.monthly ? MEMBERSHIP.monthlyAmount : MEMBERSHIP.yearlyAmount;
@@ -149,6 +165,120 @@ export class MembershipController {
         amount,
         planId,
         planLabel,
+      },
+    }).send(res);
+  });
+
+  /**
+   * iOS App Store IAP only. Android continues to use /membership/pay (Authorize.Net)
+   * or the website checkout flow.
+   */
+  apple = asyncHandler(async (req: any, res: Response) => {
+    if (!req.user?.id) throw new AuthFailureError('Authentication required');
+
+    const planId = parsePlanId(req.body?.planId);
+    const productId = String(req.body?.productId || '').trim();
+    const transactionId = String(req.body?.transactionId || '').trim();
+    const originalTransactionId = String(
+      req.body?.originalTransactionId || transactionId,
+    ).trim();
+    const purchaseToken = String(req.body?.purchaseToken || '').trim();
+
+    if (!productId || !transactionId) {
+      throw new BadRequestError('Apple product and transaction id are required.');
+    }
+
+    const expectedProductId = APPLE_PRODUCT_IDS[planId];
+    if (productId !== expectedProductId) {
+      throw new BadRequestError('Apple product does not match the selected plan.');
+    }
+
+    const mapped = planIdFromAppleProductId(productId);
+    if (!mapped || mapped !== planId) {
+      throw new BadRequestError('Invalid Apple membership product.');
+    }
+
+    const verified = await verifyApplePurchasePayload({
+      productId,
+      transactionId,
+      originalTransactionId,
+      purchaseToken,
+    });
+
+    const existingByTx = await MembershipRepo.findByTransactionId(
+      verified.transactionId,
+    );
+    if (existingByTx && existingByTx.userId !== req.user.id) {
+      throw new BadRequestError(
+        'This Apple purchase is already linked to another account.',
+      );
+    }
+
+    const startsAt = verified.purchaseDate
+      ? new Date(verified.purchaseDate)
+      : new Date();
+    const endsAt = verified.expiresDate
+      ? new Date(verified.expiresDate)
+      : computeEndsAt(planId, startsAt);
+
+    const membership = await MembershipRepo.activate({
+      userId: req.user.id,
+      planId,
+      startsAt,
+      endsAt,
+      transactionId: verified.transactionId,
+      subscriptionId: verified.originalTransactionId,
+    });
+
+    const user = req.user;
+    const email = String(user.email || '').trim();
+    const firstName = user.firstName || '';
+    const lastName = user.lastName || '';
+    const name = [firstName, lastName].filter(Boolean).join(' ') || email;
+    const planLabel = PLAN_LABEL[planId];
+    const amount = planAmount(planId);
+
+    if (isMailConfigured()) {
+      const amountLabel = formatAmount(amount);
+      try {
+        await sendPaymentStudioEmail({
+          name,
+          email,
+          planLabel: `${planLabel} (App Store)`,
+          amount: amountLabel,
+          transactionId: verified.transactionId,
+        });
+        if (SMTP.sendAutoReply) {
+          await sendPaymentUserEmail({
+            to: email,
+            firstName: firstName || 'there',
+            planLabel: `${planLabel} (App Store)`,
+            amount: amountLabel,
+            transactionId: verified.transactionId,
+          });
+        }
+      } catch (error) {
+        Logger.error(
+          `Apple payment email failed: ${
+            error instanceof Error ? error.message : error
+          }`,
+        );
+      }
+    }
+
+    return new SuccessResponse('Apple membership activated', {
+      membership,
+      isMember: true,
+      requiresPlan: false,
+      payment: {
+        provider: 'apple',
+        transactionId: verified.transactionId,
+        originalTransactionId: verified.originalTransactionId,
+        productId: verified.productId,
+        amount,
+        planId,
+        planLabel,
+        environment: verified.environment || null,
       },
     }).send(res);
   });

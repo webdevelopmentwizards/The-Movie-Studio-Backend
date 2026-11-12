@@ -30,6 +30,20 @@ export default class MembershipRepo {
     });
   }
 
+  public static async findByTransactionId(transactionId: string) {
+    return prisma.membership.findFirst({
+      where: { transactionId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  public static async findBySubscriptionId(subscriptionId: string) {
+    return prisma.membership.findFirst({
+      where: { subscriptionId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   public static async activate(data: UpsertMembershipInput) {
     const existing = await this.findActiveByUserId(data.userId);
 

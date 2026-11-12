@@ -14,5 +14,6 @@ export class MembershipRoutes {
     this.router.get('/config', this.controller.config);
     this.router.get('/me', authentication, this.controller.me);
     this.router.post('/pay', authentication, this.controller.pay);
+    this.router.post('/apple', authentication, this.controller.apple);
   }
 }
