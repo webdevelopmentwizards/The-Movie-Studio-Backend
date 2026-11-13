@@ -93,8 +93,6 @@ export async function verifyApplePurchasePayload(input: {
 
   const sharedSecret = String(process.env.APPLE_IAP_SHARED_SECRET || '').trim();
   if (!sharedSecret || !token) {
-    // Still accept explicit ids from a trusted logged-in client when JWS is
-    // unavailable (e.g. restore edge cases). Prefer configuring shared secret.
     Logger.warn(
       'Apple IAP JWS missing and APPLE_IAP_SHARED_SECRET unset; using client transaction ids.',
     );
@@ -122,7 +120,6 @@ export async function verifyApplePurchasePayload(input: {
   for (const url of endpoints) {
     const { data } = await axios.post(url, body, { timeout: 20000 });
     lastStatus = Number(data?.status);
-    // 21007 = sandbox receipt sent to production
     if (lastStatus === 21007) continue;
     if (lastStatus !== 0) {
       throw new BadRequestError(

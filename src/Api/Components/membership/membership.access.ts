@@ -6,6 +6,11 @@ export type PlanAccess = {
   membership: Awaited<ReturnType<typeof MembershipRepo.findActiveByUserId>> | null;
 };
 
+/**
+ * Membership is account-scoped (userId), not device/store-scoped.
+ * Apple IAP, website Authorize.Net, and Android web checkout all unlock
+ * the same active membership for login on web + every app platform.
+ */
 export async function getPlanAccess(user: {
   id: string;
   role?: { code?: string } | null;

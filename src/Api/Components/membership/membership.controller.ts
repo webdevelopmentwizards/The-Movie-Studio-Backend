@@ -93,6 +93,21 @@ export class MembershipController {
   pay = asyncHandler(async (req: any, res: Response) => {
     if (!req.user?.id) throw new AuthFailureError('Authentication required');
 
+    // Account-scoped membership: Apple IAP / web / Android all share the same row.
+    const existingAccess = await getPlanAccess(req.user);
+    if (existingAccess.isMember && existingAccess.membership) {
+      return new SuccessResponse('Membership already active', {
+        membership: existingAccess.membership,
+        isMember: true,
+        requiresPlan: false,
+        payment: {
+          provider: 'existing',
+          alreadyMember: true,
+          planId: existingAccess.membership.planId,
+        },
+      }).send(res);
+    }
+
     const planId = parsePlanId(req.body?.planId);
     const opaqueData = req.body?.opaqueData || {};
     const dataDescriptor = String(opaqueData.dataDescriptor || '').trim();
@@ -214,6 +229,33 @@ export class MembershipController {
       );
     }
 
+    // Same Apple subscription restored onto this account — return active row.
+    if (existingByTx && existingByTx.userId === req.user.id) {
+      const planAccess = await getPlanAccess(req.user);
+      return new SuccessResponse('Apple membership already active', {
+        membership: existingByTx,
+        isMember: planAccess.isMember || true,
+        requiresPlan: false,
+        payment: {
+          provider: 'apple',
+          alreadyMember: true,
+          transactionId: verified.transactionId,
+          originalTransactionId: verified.originalTransactionId,
+          productId: verified.productId,
+          planId,
+        },
+      }).send(res);
+    }
+
+    const existingBySub = await MembershipRepo.findBySubscriptionId(
+      verified.originalTransactionId,
+    );
+    if (existingBySub && existingBySub.userId !== req.user.id) {
+      throw new BadRequestError(
+        'This Apple subscription is already linked to another account.',
+      );
+    }
+
     const startsAt = verified.purchaseDate
       ? new Date(verified.purchaseDate)
       : new Date();
@@ -221,6 +263,8 @@ export class MembershipController {
       ? new Date(verified.expiresDate)
       : computeEndsAt(planId, startsAt);
 
+    // Activates/updates the same Membership row used by web + Android pays,
+    // so entitlement is account-based across every client.
     const membership = await MembershipRepo.activate({
       userId: req.user.id,
       planId,
